@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex, nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kindle-board test</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #fff; color: #000; }
+  body { font-family: sans-serif; padding: 6% 7%; }
+  .label { font-size: 22px; letter-spacing: 2px; color: #444; }
+  #clock { font-size: 140px; font-weight: bold; line-height: 1.05; margin: 6px 0 4px; }
+  #date { font-size: 30px; margin-bottom: 36px; }
+  table { border-collapse: collapse; width: 100%; font-size: 28px; }
+  td { padding: 14px 0; border-top: 3px solid #000; }
+  td.v { text-align: right; font-weight: bold; }
+  #verdict { margin-top: 36px; padding: 18px 20px; border: 4px solid #000; font-size: 30px; font-weight: bold; }
+  .hint { margin-top: 26px; font-size: 22px; color: #333; line-height: 1.5; }
+</style>
+</head>
+<body>
+  <div class="label">KINDLE-BOARD · 常亮测试</div>
+  <div id="clock">--:--</div>
+  <div id="date"></div>
+
+  <table>
+    <tr><td>已连续运行</td><td class="v" id="up">0 分钟</td></tr>
+    <tr><td>检测到休眠</td><td class="v" id="gaps">0 次</td></tr>
+    <tr><td>最长一次中断</td><td class="v" id="maxgap">—</td></tr>
+    <tr><td>页面自动重载</td><td class="v" id="reloads">0 次</td></tr>
+    <tr><td>本次加载于</td><td class="v" id="loaded">--:--</td></tr>
+  </table>
+
+  <div id="verdict">测试中……放着别动，15 分钟后回来看</div>
+
+  <div class="hint">
+    判断方法：时钟一直在走、「检测到休眠」是 0 次，就说明 Kindle 没睡。<br>
+    页面每 10 分钟会自己重载一次，用来顺便测试自动刷新。
+  </div>
+
+<script>
+// 只用 ES5 语法，Kindle 自带浏览器很老
+(function () {
+  var TICK_MS = 20000;          // 每 20 秒检查一次
+  var GAP_MS = 90000;           // 两次检查间隔超过 90 秒，就认为中间睡过
+  var RELOAD_MS = 10 * 60000;   // 每 10 分钟整页重载
+
+  function pad(n) { return n < 10 ? '0' + n : '' + n; }
+  function hhmm(d) { return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+  function el(id) { return document.getElementById(id); }
+
+  function getParams() {
+    var out = {};
+    var q = window.location.search.replace(/^\?/, '');
+    if (!q) return out;
+    var parts = q.split('&');
+    for (var i = 0; i < parts.length; i++) {
+      var kv = parts[i].split('=');
+      if (kv.length === 2) out[kv[0]] = parseInt(kv[1], 10);
+    }
+    return out;
+  }
+
+  var p = getParams();
+  var now = new Date().getTime();
+  var start = p.start > 0 ? p.start : now;
+  var gaps = p.gaps > 0 ? p.gaps : 0;
+  var maxGap = p.maxgap > 0 ? p.maxgap : 0;
+  var reloads = p.reloads > 0 ? p.reloads : 0;
+
+  // 重载本身也可能跨过一次休眠：用上一页记下的时间判断
+  if (p.last > 0 && now - p.last > GAP_MS + 30000) {
+    gaps += 1;
+    if (now - p.last > maxGap) maxGap = now - p.last;
+  }
+
+  var lastTick = now;
+  var loadedAt = new Date(now);
+  el('loaded').innerHTML = hhmm(loadedAt);
+
+  function fmtGap(ms) {
+    if (ms <= 0) return '—';
+    var m = Math.round(ms / 60000);
+    return m < 1 ? '不到 1 分钟' : m + ' 分钟';
+  }
+
+  function render() {
+    var d = new Date();
+    var weeks = ['日', '一', '二', '三', '四', '五', '六'];
+    el('clock').innerHTML = hhmm(d);
+    el('date').innerHTML = d.getFullYear() + ' 年 ' + (d.getMonth() + 1) + ' 月 ' +
+      d.getDate() + ' 日 · 星期' + weeks[d.getDay()];
+    var upMin = Math.floor((d.getTime() - start) / 60000);
+    el('up').innerHTML = upMin + ' 分钟';
+    el('gaps').innerHTML = gaps + ' 次';
+    el('maxgap').innerHTML = fmtGap(maxGap);
+    el('reloads').innerHTML = reloads + ' 次';
+
+    var v = el('verdict');
+    if (gaps > 0) {
+      v.innerHTML = '没通过：中间睡过 ' + gaps + ' 次';
+    } else if (upMin >= 15) {
+      v.innerHTML = '通过：已经连续亮了 ' + upMin + ' 分钟';
+    } else {
+      v.innerHTML = '测试中……还要 ' + (15 - upMin) + ' 分钟';
+    }
+  }
+
+  function tick() {
+    var t = new Date().getTime();
+    if (t - lastTick > GAP_MS) {
+      gaps += 1;
+      if (t - lastTick > maxGap) maxGap = t - lastTick;
+    }
+    lastTick = t;
+    render();
+  }
+
+  function reload() {
+    var t = new Date().getTime();
+    var url = window.location.pathname +
+      '?start=' + start + '&gaps=' + gaps + '&maxgap=' + maxGap +
+      '&reloads=' + (reloads + 1) + '&last=' + t;
+    window.location.replace(url);
+  }
+
+  render();
+  setInterval(tick, TICK_MS);
+  setTimeout(reload, RELOAD_MS);
+})();
+</script>
+</body>
+</html>
